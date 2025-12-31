@@ -1,20 +1,23 @@
 import redis.clients.jedis.Jedis;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
 
 public class RateLimiter {
-    public static boolean allowRequest(Jedis jedis, String userId, int limit) {
-        // Hint: Use jedis.incr(userId)
-        long count = jedis.incr(userId);
-        System.out.println("Redis Count for " + userId + ": " + count);
+    private static String loadScript() {
+        try {
+            return Files.readString(Path.of("src/main/resources/request_rate_limiter.lua"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-        if (count == 1) {
-            jedis.expire(userId, 60);
-        } 
-        
-        if (count > limit) {
-            return false;
-        } 
-        
-        return true;
+    public static boolean allowRequest(Jedis jedis, String userId, int capacity, double tokensPerSecond) {
+        String script = loadScript();
+        long time = Instant.now().getEpochSecond(); //System.currentTimeMillis()
+
+        Object result = jedis.eval(script, 1, userId, String.valueOf(capacity), String.valueOf(tokensPerSecond), String.valueOf(time));
+        return "1".equals(result.toString());
     }
 
     public static void main(String[] args) {
@@ -23,7 +26,7 @@ public class RateLimiter {
             System.out.println("Hacker Attack Simulation");
 
             for (int i = 1; i <= 10; i++) {
-                boolean allowed = allowRequest(jedis, "hacker_1", 5);
+                boolean allowed = allowRequest(jedis, "hacker_1", 5, 1);
                 
                 if (allowed) {
                     System.out.println("Request " + i + ": ALLOWED");
